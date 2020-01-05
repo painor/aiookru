@@ -10,7 +10,7 @@ from .parsers import AuthDialogParser, AccessDialogParser
 
 
 log = logging.getLogger(__name__)
-
+REST_NO_SIGN_ARGS = ["sig", "access_token"]
 
 class Session:
     """A wrapper around aiohttp.ClientSession."""
@@ -98,7 +98,7 @@ class TokenSession(PublicSession):
     @property
     def required_params(self):
         """Required parameters."""
-        return {'application_key': self.app_key, 'format': self.format}
+        return {'application_key': self.app_key, 'format': self.format ,'access_token':self.access_token}
 
     @property
     def sig_circuit(self):
@@ -120,7 +120,7 @@ class TokenSession(PublicSession):
             raise Error(self.ERROR_MSG)
 
     def params_to_str(self, params):
-        query = ''.join(f'{k}={str(params[k])}' for k in sorted(params))
+        query = ''.join(f'{k}={str(params[k])}' for k in sorted(params) if k not in REST_NO_SIGN_ARGS)
         return f'{query}{self.secret_key}'
 
     def sign_params(self, params):
@@ -207,7 +207,6 @@ class ImplicitSession(TokenSession):
         for attempt_num in range(attempts):
             log.debug(f'getting authorization dialog {self.OAUTH_URL}')
             url, html = await self._get_auth_dialog()
-
             st_cmd = url.query.get('st.cmd')
             if url.path == '/dk' and st_cmd == 'OAuth2Login':
                 log.debug(f'authorizing at {url}')
@@ -215,8 +214,9 @@ class ImplicitSession(TokenSession):
 
             st_cmd = url.query.get('st.cmd')
             if url.path == '/dk' and st_cmd == 'OAuth2Permissions':
-                log.debug(f'giving permissions ar {url}')
+                log.debug(f'giving permissions at {url}')
                 url, html = await self._post_access_dialog(html)
+                print("new url is",url.path)
             elif url.path == '/dk' and st_cmd == 'OAuth2Login':
                 log.error('Invalid login or password.')
                 raise AuthError()
@@ -276,31 +276,32 @@ class ImplicitSession(TokenSession):
         parser.close()
 
         form_url, form_data = parser.form
-
-        async with self.session.post(form_url, data=form_data) as resp:
+        form_url = f'https://connect.ok.ru{form_url}'
+        print("formdata is ",form_data)
+        form_data['button_accept_request'] = ''
+        async with self.session.post(form_url, data=form_data,proxy='http://127.0.0.1:8888') as resp:
             if resp.status != 200:
                 log.error(self.POST_ACCESS_DIALOG_ERROR_MSG)
                 raise Error(self.POST_ACCESS_DIALOG_ERROR_MSG)
             else:
+                print("returning now")
+                print(resp.url)
+                location = URL(resp.history[-1].headers['Location'])
+                url = URL(f'?{location.fragment}')
+                try:
+                    self.access_token = url.query['access_token']
+                    self.session_secret_key = url.query['session_secret_key']
+                    self.expires_in = url.query['expires_in']
+                except KeyError as e:
+                    raise Error(f'"{e.args[0]}" is missing in the auth response.')
+
                 url, html = resp.url, await resp.text()
 
         return url, html
 
     async def _get_access_token(self):
-        async with self.session.get(self.OAUTH_URL, params=self.params) as resp:
-            if resp.status != 200:
-                log.error(self.GET_ACCESS_TOKEN_ERROR_MSG)
-                raise Error(self.GET_ACCESS_TOKEN_ERROR_MSG)
-            else:
-                location = URL(resp.history[-1].headers['Location'])
-                url = URL(f'?{location.fragment}')
+        return
 
-        try:
-            self.access_token = url.query['access_token']
-            self.session_secret_key = url.query['session_secret_key']
-            self.expires_in = url.query['expires_in']
-        except KeyError as e:
-            raise Error(f'"{e.args[0]}" is missing in the auth response.')
 
 
 class ImplicitClientSession(ImplicitSession):
