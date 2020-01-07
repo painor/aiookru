@@ -216,7 +216,6 @@ class ImplicitSession(TokenSession):
             if url.path == '/dk' and st_cmd == 'OAuth2Permissions':
                 log.debug(f'giving permissions at {url}')
                 url, html = await self._post_access_dialog(html)
-                print("new url is",url.path)
             elif url.path == '/dk' and st_cmd == 'OAuth2Login':
                 log.error('Invalid login or password.')
                 raise AuthError()
@@ -277,15 +276,12 @@ class ImplicitSession(TokenSession):
 
         form_url, form_data = parser.form
         form_url = f'https://connect.ok.ru{form_url}'
-        print("formdata is ",form_data)
         form_data['button_accept_request'] = ''
-        async with self.session.post(form_url, data=form_data,proxy='http://127.0.0.1:8888') as resp:
+        async with self.session.post(form_url, data=form_data) as resp:
             if resp.status != 200:
                 log.error(self.POST_ACCESS_DIALOG_ERROR_MSG)
                 raise Error(self.POST_ACCESS_DIALOG_ERROR_MSG)
             else:
-                print("returning now")
-                print(resp.url)
                 location = URL(resp.history[-1].headers['Location'])
                 url = URL(f'?{location.fragment}')
                 try:
